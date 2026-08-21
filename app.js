@@ -389,6 +389,7 @@ function updateVesselPosition(mmsi, lat, lon, name, sog, cog) {
     }
   }
   renderFerryLiveStrip();
+  try { loadTrafficAdvisory(); } catch (_) {}
 }
 
 
@@ -640,26 +641,83 @@ function renderTraffic() {
   loadTrafficAdvisory();
 }
 
+let deldotCache = { advisories: [], restrictions: [], fetchedAt: 0 };
+
+async function fetchDelDot() {
+  if (Date.now() - deldotCache.fetchedAt < 60000 && deldotCache.advisories.length) {
+    return deldotCache;
+  }
+  try {
+    const [aRes, rRes] = await Promise.all([
+      fetch('https://tmc.deldot.gov/json/advisory.json', { cache: 'no-store' }),
+      fetch('https://tmc.deldot.gov/json/restriction.json', { cache: 'no-store' })
+    ]);
+    const aJson = aRes.ok ? await aRes.json() : { advisories: [] };
+    const rJson = rRes.ok ? await rRes.json() : { restrictions: [] };
+    deldotCache = {
+      advisories: aJson.advisories || [],
+      restrictions: rJson.restrictions || [],
+      fetchedAt: Date.now()
+    };
+  } catch (e) {
+    console.warn('DelDOT fetch failed', e);
+  }
+  return deldotCache;
+}
+
+function isCoastalRelevant(item) {
+  const loc = (
+    (item.where && item.where.location) ||
+    item.title ||
+    item.location ||
+    ''
+  ).toUpperCase();
+  const county = ((item.where && item.where.county && item.where.county.name) || '').toUpperCase();
+  if (county.includes('SUSSEX')) return true;
+  return /\bDE[- ]?1\b|COASTAL|REHOBOTH|DEWEY|LEWES|BETHANY|FENWICK|INDIAN RIVER|FIVE POINTS|NASSAU|SR[- ]?1\b/.test(loc);
+}
+
+function formatAdvisory(a) {
+  const type = (a.type && a.type.name) || 'Advisory';
+  const loc = (a.where && a.where.location) || '—';
+  const county = (a.where && a.where.county && a.where.county.name) || '';
+  const link = a.published && a.published.linkbackUrl;
+  const when = a.timestamp ? new Date(a.timestamp).toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+  return { type, loc, county, link, when, id: a.id };
+}
+
+function formatRestriction(r) {
+  const type = r.impactType || 'Restriction';
+  const loc = (r.where && r.where.location) || r.title || '—';
+  const county = (r.where && r.where.county && r.where.county.name) || '';
+  const when = r.startDate ? new Date(r.startDate).toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric' }) : '';
+  return { type, loc, county, link: null, when, id: r.restrictionId };
+}
+
 async function loadTrafficAdvisory() {
   const box = document.getElementById('traffic-advisory');
   if (!box) return;
-  // DelDOT does not expose a free CORS JSON feed; surface official links + seasonal facts.
-  const hour = new Date().toLocaleString('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false });
-  const h = parseInt(hour, 10);
-  const day = new Date().toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short' });
-  const summer = [5,6,7,8].includes(new Date().getMonth() + 1); // rough
-  let tip = 'Check DelDOT for active incidents. ';
-  if (summer && (day === 'Fri' || day === 'Sat' || day === 'Sun')) {
-    tip += 'Weekend beach traffic: expect delays Five Points → Dewey on DE-1.';
-  } else if (h >= 15 && h <= 19 && (day === 'Fri')) {
-    tip += 'Friday PM southbound beach rush typically builds after 15:00 ET.';
-  } else if (h >= 10 && h <= 14 && day === 'Sun') {
-    tip += 'Sunday northbound return traffic often peaks late morning–afternoon.';
-  } else {
-    tip += 'Off-peak conditions usually moderate outside holiday weekends.';
+  box.innerHTML = '<span class="text-[#8b929e]">Loading DelDOT TMC feed…</span>';
+  const data = await fetchDelDot();
+  const coastalA = (data.advisories || []).filter(isCoastalRelevant).map(formatAdvisory);
+  const coastalR = (data.restrictions || []).filter(isCoastalRelevant).map(formatRestriction);
+  const items = [...coastalA, ...coastalR].slice(0, 6);
+  if (!items.length) {
+    box.innerHTML = `<span class="text-[#00ff88]">No active Sussex / DE-1 advisories in TMC feed</span>
+      <div class="text-[#6b7280] mt-0.5">${data.advisories.length} statewide advisories · ${data.restrictions.length} planned restrictions</div>
+      <a class="text-blue-400 underline" style="font-size:9px" href="https://deldot.gov/Traffic/travel_advisory/" target="_blank" rel="noopener">DelDOT full list ↗</a>`;
+    return;
   }
-  box.innerHTML = `<span class="text-[#8b929e]">${tip}</span>
-    <div class="mt-1"><a class="text-blue-400 underline" href="https://deldot.gov/Traffic/travel_advisory/" target="_blank" rel="noopener">Open live Sussex / statewide advisories</a></div>`;
+  box.innerHTML = items.map(it => `
+    <div class="mb-1 pb-1 border-b border-[#2e3440]/80">
+      <div class="flex justify-between gap-1">
+        <span class="font-semibold text-amber-300">${it.type}</span>
+        <span class="text-[#6b7280] mono">${it.when}</span>
+      </div>
+      <div class="text-[#e8eaed] leading-snug">${it.loc}</div>
+      <div class="text-[#6b7280]">${it.county}${it.link ? ` · <a class="text-blue-400" href="${it.link}" target="_blank" rel="noopener">details</a>` : ''}</div>
+    </div>
+  `).join('') + `<div class="text-[#6b7280] mt-0.5">Source: DelDOT TMC · ${data.advisories.length} adv / ${data.restrictions.length} restrictions</div>`;
 }
 
 
@@ -924,6 +982,7 @@ document.getElementById('refresh-btn').addEventListener('click', () => loadDashb
 
 // Initial render of static parts + load
 renderTraffic();
+// traffic live feed refreshed with dashboard
 renderParks();
 renderFerry();
 loadDashboard({ softWebcam: false });
@@ -1107,23 +1166,42 @@ function panelBody(id) {
       <p class="text-xs text-ocean-500 mt-3">Confirm temporary closures at <a class="underline" href="https://destateparks.com" target="_blank" rel="noopener">destateparks.com</a></p>`;
   }
   if (id === 'traffic') {
-    return `<p class="text-xs text-[#8b929e] mb-3">Delaware Route 1 (Coastal Highway) is the primary beach corridor from Dover AFB south through Nassau, Rehoboth, Dewey, Bethany, and Fenwick. DelDOT manages real-time advisories; free public APIs for live speeds are limited.</p>
+    // Kick off live DelDOT load into modal
+    setTimeout(async () => {
+      const host = document.getElementById('traffic-modal-live');
+      if (!host) return;
+      host.innerHTML = 'Loading DelDOT TMC…';
+      const data = await fetchDelDot();
+      const coastalA = (data.advisories || []).filter(isCoastalRelevant).map(formatAdvisory);
+      const coastalR = (data.restrictions || []).filter(isCoastalRelevant).map(formatRestriction);
+      const items = [...coastalA, ...coastalR].slice(0, 12);
+      if (!items.length) {
+        host.innerHTML = `<span class="text-[#00ff88]">No active Sussex / DE-1 items</span> · ${data.advisories.length} statewide advisories in feed.`;
+        return;
+      }
+      host.innerHTML = items.map(it => `
+        <div class="mb-2 p-2 rounded border border-[#2e3440] bg-[#1a1d23]">
+          <div class="flex justify-between"><span class="text-amber-300 font-semibold text-xs">${it.type}</span><span class="text-[#6b7280] text-[10px] mono">${it.when}</span></div>
+          <div class="text-sm text-white mt-0.5">${it.loc}</div>
+          <div class="text-[11px] text-[#8b929e]">${it.county}${it.link ? ` · <a class="text-blue-400" href="${it.link}" target="_blank" rel="noopener">DelDOT details</a>` : ''}</div>
+        </div>`).join('');
+    }, 50);
+    return `<p class="text-xs text-[#8b929e] mb-2">Live data from DelDOT Transportation Management Center (<code class="text-[#c5cad3]">tmc.deldot.gov</code>). Filtered for Sussex County and DE-1 / beach corridor keywords.</p>
+      <div id="traffic-modal-live" class="mb-3 text-xs text-[#8b929e]">Loading…</div>
+      <div class="label mb-1">Corridor reference</div>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
         ${RT1_SEGMENTS.map(s => `
           <div class="chip p-2" style="border-color:#3a4150">
             <div class="font-semibold text-white text-sm">${s.name}</div>
             <div class="text-xs text-[#8b929e]">${s.loc}</div>
             <div class="text-xs text-[#c5cad3] mt-1">${s.note}</div>
-            <div class="text-[10px] mono text-[#6b7280] mt-1">${s.aadt}</div>
           </div>`).join('')}
       </div>
       <div class="flex flex-wrap gap-2 text-xs">
-        <a class="text-blue-400 underline" href="https://deldot.gov/Traffic/travel_advisory/" target="_blank" rel="noopener">DelDOT travel advisories</a>
-        <a class="text-blue-400 underline" href="https://deldot.gov/map/" target="_blank" rel="noopener">DelDOT interactive map</a>
-        <a class="text-blue-400 underline" href="https://www.debeachtraffic.com/" target="_blank" rel="noopener">Lewes–Rehoboth traffic cam portal</a>
-        <a class="text-blue-400 underline" href="https://deldot.gov/Traffic/travel_advisory/" target="_blank" rel="noopener">Planned closures</a>
-      </div>
-      <p class="text-[11px] text-[#6b7280] mt-3">Tip: Friday southbound and Sunday northbound are the classic peak directions in summer. Five Points (US 9 / DE 1) is the usual bottleneck for Rehoboth / Dewey access.</p>`;
+        <a class="text-blue-400 underline" href="https://deldot.gov/Traffic/travel_advisory/" target="_blank" rel="noopener">DelDOT advisories</a>
+        <a class="text-blue-400 underline" href="https://deldot.gov/map/" target="_blank" rel="noopener">Interactive map</a>
+        <a class="text-blue-400 underline" href="https://tmc.deldot.gov/json/advisory.json" target="_blank" rel="noopener">Raw TMC JSON</a>
+      </div>`;
   }
   if (id === 'alerts') {
     const feats = p.alerts?.features || [];
