@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Delaware Coastal Dashboard | Beaches & State Parks</title>
+  <meta name="description" content="Live conditions for Delaware beaches and coastal state parks — weather, tides, water temperature, rip currents, alerts, and park status." />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            ocean: {
+              950: '#020617',
+              900: '#0c1929',
+              800: '#0f2744',
+              700: '#163a5f',
+              600: '#1e4d7b',
+              500: '#2563a8',
+              400: '#3b82c4',
+              300: '#60a5d8',
+            },
+            sand: {
+              400: '#e8d5b7',
+              300: '#f5e6c8',
+            },
+            accent: {
+              gold: '#d4a853',
+              coral: '#e07a5f',
+              mint: '#81b29a',
+            }
+          },
+          fontFamily: {
+            display: ['Segoe UI', 'system-ui', 'sans-serif'],
+            mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    body { font-family: 'Inter', system-ui, sans-serif; }
+    .glass {
+      background: linear-gradient(135deg, rgba(15, 39, 68, 0.85), rgba(12, 25, 41, 0.9));
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(96, 165, 216, 0.15);
+    }
+    .card-hover:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 40px rgba(37, 99, 168, 0.25);
+    }
+    .status-open { background: linear-gradient(90deg, #166534, #15803d); }
+    .status-closed { background: linear-gradient(90deg, #991b1b, #b91c1c); }
+    .status-caution { background: linear-gradient(90deg, #a16207, #ca8a04); }
+    .pulse-dot {
+      animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    .tide-bar {
+      transition: height 0.6s ease;
+    }
+    .webcam-frame {
+      aspect-ratio: 16/9;
+      background: #0c1929;
+    }
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: #0c1929; }
+    ::-webkit-scrollbar-thumb { background: #1e4d7b; border-radius: 4px; }
+    .alert-banner {
+      background: linear-gradient(90deg, #7f1d1d, #991b1b);
+    }
+    .skeleton {
+      background: linear-gradient(90deg, #0f2744 25%, #163a5f 50%, #0f2744 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+    }
+    @keyframes shimmer {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+  </style>
+</head>
+<body class="bg-ocean-950 text-slate-100 min-h-screen">
+  <!-- Header -->
+  <header class="sticky top-0 z-50 border-b border-ocean-700/50 bg-ocean-950/90 backdrop-blur-md">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-full bg-gradient-to-br from-ocean-400 to-ocean-600 flex items-center justify-center shadow-lg shadow-ocean-500/30">
+          <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"/></svg>
+        </div>
+        <div>
+          <h1 class="text-xl sm:text-2xl font-semibold tracking-tight text-white">Delaware Coastal Dashboard</h1>
+          <p class="text-xs text-ocean-300">Beaches • State Parks • Live Conditions</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-4 text-sm">
+        <div class="flex items-center gap-2 text-ocean-300" title="Data connection mode">
+          <span id="conn-dot" class="w-2 h-2 rounded-full bg-amber-500 pulse-dot"></span>
+          <span id="conn-label" class="text-xs hidden sm:inline">Connecting…</span>
+        </div>
+        <div class="flex items-center gap-2 text-ocean-300">
+          <span id="last-updated">Updating…</span>
+        </div>
+        <button id="refresh-btn" class="px-3 py-1.5 rounded-lg bg-ocean-700 hover:bg-ocean-600 text-sm font-medium transition flex items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+          Refresh
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Active Alerts Banner -->
+  <div id="alerts-banner" class="hidden">
+    <div class="alert-banner text-white px-4 py-3">
+      <div class="max-w-7xl mx-auto flex items-start gap-3">
+        <svg class="w-6 h-6 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+        <div class="flex-1">
+          <p class="font-semibold text-sm uppercase tracking-wide">Active Weather Alerts</p>
+          <div id="alerts-list" class="mt-1 text-sm space-y-1"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-10">
+
+    <!-- Quick Status Strip -->
+    <section>
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-semibold text-white flex items-center gap-2">
+          <span class="w-1 h-5 bg-accent-gold rounded-full"></span>
+          Regional Snapshot
+        </h2>
+        <span class="text-xs text-ocean-400" id="snapshot-meta">Loading regional data…</span>
+      </div>
+      <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3" id="snapshot-grid">
+        <!-- Populated by JS -->
+      </div>
+    </section>
+
+    <!-- Beach Cards Grid -->
+    <section>
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-semibold text-white flex items-center gap-2">
+          <span class="w-1 h-5 bg-accent-gold rounded-full"></span>
+          Beach & Park Conditions
+        </h2>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5" id="beach-cards">
+        <!-- Cards injected by JS -->
+      </div>
+    </section>
+
+    <!-- 7-Day Outlook -->
+    <section class="glass rounded-2xl p-6">
+      <h2 class="text-lg font-semibold text-white mb-5 flex items-center gap-2">
+        <span class="w-1 h-5 bg-accent-gold rounded-full"></span>
+        7-Day Outlook — Delaware Beaches
+      </h2>
+      <div class="overflow-x-auto">
+        <div class="flex gap-3 min-w-max" id="forecast-strip">
+          <!-- Daily cards -->
+        </div>
+      </div>
+    </section>
+
+    <!-- Tides Section -->
+    <section class="glass rounded-2xl p-6">
+      <div class="flex flex-wrap items-center justify-between gap-4 mb-5">
+        <h2 class="text-lg font-semibold text-white flex items-center gap-2">
+          <span class="w-1 h-5 bg-accent-gold rounded-full"></span>
+          Tide Predictions
+        </h2>
+        <select id="tide-station" class="bg-ocean-800 border border-ocean-600 rounded-lg px-3 py-1.5 text-sm text-ocean-100 focus:outline-none focus:ring-2 focus:ring-ocean-400">
+          <option value="8557380">Lewes (Breakwater Harbor)</option>
+          <option value="8557863">Rehoboth Beach</option>
+          <option value="8555889">Brandywine Shoal Light</option>
+        </select>
+      </div>
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div class="lg:col-span-2">
+          <div class="h-48 flex items-end gap-1" id="tide-chart">
+            <!-- Tide bars -->
+          </div>
+          <p class="text-xs text-ocean-400 mt-2 text-center">Next 24–36 hours • Heights relative to MLLW</p>
+        </div>
+        <div>
+          <h3 class="text-sm font-medium text-ocean-300 mb-3">Upcoming Highs & Lows</h3>
+          <ul class="space-y-2 text-sm" id="tide-list">
+            <!-- List items -->
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- Marine & Water -->
+    <section class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div class="glass rounded-2xl p-6">
+        <h2 class="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+          <span class="w-1 h-5 bg-accent-gold rounded-full"></span>
+          Marine Conditions
+        </h2>
+        <div id="marine-panel" class="space-y-4">
+          <div class="skeleton h-24 rounded-xl"></div>
+        </div>
+      </div>
+      <div class="glass rounded-2xl p-6">
+        <h2 class="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+          <span class="w-1 h-5 bg-accent-gold rounded-full"></span>
+          Water Temperature & Buoy
+        </h2>
+        <div id="water-panel" class="space-y-4">
+          <div class="skeleton h-24 rounded-xl"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Live Webcams -->
+    <section class="glass rounded-2xl p-6">
+      <div class="flex flex-wrap items-center justify-between gap-4 mb-5">
+        <h2 class="text-lg font-semibold text-white flex items-center gap-2">
+          <span class="w-1 h-5 bg-accent-gold rounded-full"></span>
+          Live Webcams
+        </h2>
+        <div class="flex flex-wrap gap-2" id="webcam-tabs" role="tablist">
+          <!-- Tabs injected by JS -->
+        </div>
+      </div>
+
+      <!-- Main live player -->
+      <div class="relative rounded-xl overflow-hidden bg-ocean-950 border border-ocean-700/50" style="aspect-ratio: 16/9;">
+        <div id="webcam-player" class="absolute inset-0 flex items-center justify-center">
+          <div class="text-center text-ocean-400 px-4">
+            <svg class="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+            <p class="text-sm">Select a camera below to start the live feed</p>
+          </div>
+        </div>
+        <div id="webcam-loading" class="hidden absolute inset-0 bg-ocean-950/80 flex items-center justify-center z-10">
+          <div class="text-ocean-300 text-sm animate-pulse">Loading feed…</div>
+        </div>
+      </div>
+
+      <div class="mt-3 flex flex-wrap items-center justify-between gap-2">
+        <p id="webcam-caption" class="text-sm text-ocean-300">—</p>
+        <a id="webcam-open-external" href="#" target="_blank" rel="noopener" class="text-xs text-ocean-400 hover:text-white underline hidden">Open on source site ↗</a>
+      </div>
+
+      <!-- Thumbnail picker -->
+      <div class="mt-5 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3" id="webcam-thumbs">
+        <!-- Thumb cards -->
+      </div>
+      <p class="text-xs text-ocean-500 mt-4 leading-relaxed">
+        Live feeds are provided by third-party operators (hotels, ferry, towns). Some players only work when opened on the original site due to embedding restrictions.
+        If a feed fails to load, use “Open on source site.” Feeds may go offline for maintenance or weather.
+      </p>
+    </section>
+
+    <!-- Park Status Table -->
+    <section class="glass rounded-2xl p-6">
+      <h2 class="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+        <span class="w-1 h-5 bg-accent-gold rounded-full"></span>
+        Coastal State Parks Status
+      </h2>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-left text-ocean-300 border-b border-ocean-700">
+              <th class="pb-3 pr-4 font-medium">Park</th>
+              <th class="pb-3 pr-4 font-medium">Status</th>
+              <th class="pb-3 pr-4 font-medium">Hours</th>
+              <th class="pb-3 pr-4 font-medium">Vehicle Fee</th>
+              <th class="pb-3 font-medium">Notes</th>
+            </tr>
+          </thead>
+          <tbody id="parks-table" class="divide-y divide-ocean-800">
+            <!-- Rows -->
+          </tbody>
+        </table>
+      </div>
+      <p class="text-xs text-ocean-400 mt-4">Park status is based on published seasonal information and may change due to weather, wildlife closures, or emergency conditions. Always verify at <a href="https://www.destateparks.com" target="_blank" rel="noopener" class="text-ocean-300 underline">destateparks.com</a>.</p>
+    </section>
+
+    <!-- Sources & Disclaimer -->
+    <footer class="border-t border-ocean-800 pt-8 pb-12 text-center text-sm text-ocean-400 space-y-3">
+      <p class="font-medium text-ocean-300">Data Sources (free / public)</p>
+      <div class="flex flex-wrap justify-center gap-x-6 gap-y-1 text-xs">
+        <a href="https://www.weather.gov" target="_blank" rel="noopener" class="hover:text-ocean-200">National Weather Service</a>
+        <a href="https://tidesandcurrents.noaa.gov" target="_blank" rel="noopener" class="hover:text-ocean-200">NOAA Tides &amp; Currents</a>
+        <a href="https://www.ndbc.noaa.gov" target="_blank" rel="noopener" class="hover:text-ocean-200">NDBC Buoys</a>
+        <a href="https://open-meteo.com" target="_blank" rel="noopener" class="hover:text-ocean-200">Open-Meteo</a>
+        <a href="https://www.destateparks.com" target="_blank" rel="noopener" class="hover:text-ocean-200">Delaware State Parks</a>
+        <a href="https://www.delmarvabeachguide.com" target="_blank" rel="noopener" class="hover:text-ocean-200">Delmarva Beach Guide</a>
+      </div>
+      <p class="text-xs max-w-2xl mx-auto leading-relaxed">
+        This dashboard is for informational purposes only and is not a substitute for official advisories.
+        Rip currents, thunderstorms, and changing marine conditions can be life-threatening.
+        Always swim near lifeguards, heed beach flags, and check local authorities before entering the water.
+      </p>
+      <p class="text-xs">Built for GitHub Pages • Open source • No API keys required for core data</p>
+    </footer>
+  </main>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

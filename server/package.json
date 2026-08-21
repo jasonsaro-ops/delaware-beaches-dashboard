@@ -1,0 +1,17 @@
+{
+  "name": "delaware-coastal-dashboard-ws",
+  "version": "1.0.0",
+  "description": "WebSocket companion server for Delaware Coastal Dashboard — aggregates free public APIs and pushes realtime updates",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "license": "MIT"
+}
