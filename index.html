@@ -43,7 +43,7 @@
         "status status";
     }
     .menubar { grid-area: menubar; background: #15181e; border-bottom: 1px solid #2e3440;
-      display: flex; align-items: center; padding: 0 10px; gap: 12px; font-size: 12px; }
+      display: flex; align-items: center; padding: 0 10px; gap: 12px; font-size: 12px; overflow: visible; position: relative; z-index: 12000; }
     .menubar .brand { font-weight: 700; color: #fff; letter-spacing: -0.02em; }
     .menubar nav button { background: none; border: none; color: #8b929e; font-size: 12px; padding: 4px 8px; cursor: pointer; border-radius: 3px; }
     .menubar nav button:hover { background: #2a303c; color: #e8eaed; }
@@ -139,9 +139,9 @@
     .alert-bar.show { display: block; }
     .menu-wrap { position: relative; }
     .menu-drop {
-      display: none; position: absolute; top: 100%; left: 0; min-width: 180px;
+      display: none; position: absolute; top: calc(100% + 2px); left: 0; min-width: 200px;
       background: #22262e; border: 1px solid #3a4150; border-radius: 4px;
-      box-shadow: 0 8px 24px rgba(0,0,0,.45); z-index: 11000; padding: 4px 0;
+      box-shadow: 0 8px 24px rgba(0,0,0,.55); z-index: 13000; padding: 4px 0;
     }
     .menu-wrap.open .menu-drop { display: block; }
     .menu-drop button, .menu-drop a {
@@ -239,6 +239,8 @@
     <button type="button" id="refresh-btn">Refresh</button>
     <button type="button" id="btn-fit-bay" class="active">Fit Delaware Bay</button>
     <button type="button" id="btn-tracks" class="active">Show tracks</button>
+    <div class="sep"></div>
+    <span id="ais-status" class="text-[10px] text-[#6b7280]">AIS: offline</span>
     <div class="sep"></div>
     <span class="text-[10px]">Highlight:</span>
     <button type="button" class="ferry-tb" data-mmsi="366914210" style="color:#22d3ee">Delaware</button>

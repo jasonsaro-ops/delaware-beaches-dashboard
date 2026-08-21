@@ -104,12 +104,45 @@ const PARKS = [
 ];
 
 const WEBCAMS = [
-  { id: 'atlantic-sands', name: 'Atlantic Sands', loc: 'Rehoboth', embed: null, external: 'https://www.visitdebeaches.com/webcams/live-boardwalk-cam-atlantic-sands-hotel-in-rehoboth-beach/', note: 'Boardwalk / ocean', playerHint: 'Provider blocks embed — live page opens in player frame' },
-  { id: 'cmlf-lewes', name: 'CMLF Ferry cams', loc: 'Lewes / CM', embed: 'https://www.cmlf.com/check-traffic-live-webcam-feeds/', external: 'https://www.cmlf.com/check-traffic-live-webcam-feeds/', note: 'Terminals & bay', playerHint: 'Official ferry terminal camera page' },
-  { id: 'bethany-town', name: 'Bethany Beach', loc: 'Bethany', embed: null, external: 'https://www.townofbethanybeach.com/', note: 'Boardwalk', playerHint: 'Town site — open live section' },
-  { id: 'sea-colony', name: 'Sea Colony', loc: 'Bethany', embed: null, external: 'https://www.seacolony.com/', note: 'Oceanfront', playerHint: 'Resort site cam links' },
-  { id: 'dewey-bay', name: 'Bay Resort', loc: 'Dewey', embed: null, external: 'https://bayresort.com/', note: 'Rehoboth Bay', playerHint: 'Bay cam on resort site' },
-  { id: 'deldot', name: 'DelDOT cams', loc: 'Route 1', embed: 'https://deldot.gov/map/', external: 'https://deldot.gov/map/', note: 'Traffic / inlet', playerHint: 'Statewide traffic camera map' }
+  {
+    id: 'bethany-yt',
+    name: 'Bethany Beach',
+    loc: 'Bethany',
+    youtube: 'cz1yy0PD_cc',
+    external: 'https://www.youtube.com/watch?v=cz1yy0PD_cc',
+    note: 'HD Beach Cams',
+    playerHint: 'YouTube live / recorded beach cam'
+  },
+  {
+    id: 'cmlf-lewes',
+    name: 'CMLF Ferry cams',
+    loc: 'Lewes / CM',
+    youtube: null,
+    embed: 'https://www.cmlf.com/check-traffic-live-webcam-feeds/',
+    external: 'https://www.cmlf.com/check-traffic-live-webcam-feeds/',
+    note: 'Official terminal cams',
+    playerHint: 'CMLF multi-cam page (plays when provider allows)'
+  },
+  {
+    id: 'atlantic-sands',
+    name: 'Atlantic Sands',
+    loc: 'Rehoboth',
+    youtube: null,
+    embed: null,
+    external: 'https://www.visitdebeaches.com/webcams/live-boardwalk-cam-atlantic-sands-hotel-in-rehoboth-beach/',
+    note: 'Boardwalk / ocean',
+    playerHint: 'No public YouTube feed — opens provider page in frame'
+  },
+  {
+    id: 'deldot',
+    name: 'DelDOT cams',
+    loc: 'Route 1 / Inlet',
+    youtube: null,
+    embed: 'https://deldot.gov/map/',
+    external: 'https://deldot.gov/map/',
+    note: 'Traffic cameras',
+    playerHint: 'Statewide camera map'
+  }
 ];
 
 
@@ -273,31 +306,95 @@ function fitBay() {
 }
 
 // Soft animation of markers along track (visual underway trajectories)
-let animT = 0;
-function animateFerries() {
-  if (!map) return;
-  animT = (animT + 0.002) % 1;
-  FERRY_FLEET.forEach((v, idx) => {
-    const layer = trackLayers[v.mmsi];
-    const marker = ferryMarkers[v.mmsi];
-    if (!layer || !marker) return;
-    const latlngs = layer.getLatLngs();
-    // Stagger phase so vessels appear at different points / directions
-    let t = (animT + idx * 0.33) % 1;
-    // Reverse direction for one vessel for visual variety
-    if (idx === 1) t = 1 - t;
-    const n = latlngs.length - 1;
-    const f = t * n;
-    const i = Math.floor(f);
-    const frac = f - i;
-    const a = latlngs[Math.min(i, n)];
-    const b = latlngs[Math.min(i + 1, n)];
-    const lat = a.lat + (b.lat - a.lat) * frac;
-    const lng = a.lng + (b.lng - a.lng) * frac;
-    marker.setLatLng([lat, lng]);
-  });
-  requestAnimationFrame(animateFerries);
+// Bounce animation removed — positions come from AISStream when configured
+function animateFerries() { /* disabled */ }
+
+let aisSocket = null;
+const aisTracks = {}; // mmsi -> [[lat,lng], ...]
+
+function setAisStatus(msg, ok) {
+  const el = document.getElementById('ais-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = ok ? '#00ff88' : '#6b7280';
 }
+
+function connectAisStream() {
+  const key = (window.DASHBOARD_CONFIG && window.DASHBOARD_CONFIG.AISSTREAM_API_KEY || '').trim();
+  if (!key) {
+    setAisStatus('AIS: add key in config.js', false);
+    // Park markers at terminals (static — not bouncing)
+    if (ferryMarkers['366914210']) ferryMarkers['366914210'].setLatLng(TERMINAL_CM);
+    if (ferryMarkers['366914190']) ferryMarkers['366914190'].setLatLng(TERMINAL_LEWES);
+    if (ferryMarkers['366914180']) ferryMarkers['366914180'].setLatLng([(TERMINAL_CM[0]+TERMINAL_LEWES[0])/2, (TERMINAL_CM[1]+TERMINAL_LEWES[1])/2]);
+    return;
+  }
+  try {
+    if (aisSocket) try { aisSocket.close(); } catch(_){}
+    aisSocket = new WebSocket('wss://stream.aisstream.io/v0/stream');
+    aisSocket.onopen = () => {
+      setAisStatus('AIS: connected', true);
+      const sub = {
+        APIKey: key,
+        BoundingBoxes: [[[38.70, -75.25], [39.05, -74.85]]],
+        FiltersShipMMSI: FERRY_FLEET.map(v => v.mmsi),
+        FilterMessageTypes: ['PositionReport']
+      };
+      aisSocket.send(JSON.stringify(sub));
+    };
+    aisSocket.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data);
+        if (msg.MessageType !== 'PositionReport') return;
+        const pr = msg.Message && msg.Message.PositionReport;
+        const meta = msg.MetaData || {};
+        const mmsi = String(meta.MMSI || pr?.UserID || '');
+        const lat = meta.latitude ?? pr?.Latitude;
+        const lon = meta.longitude ?? pr?.Longitude;
+        if (!mmsi || lat == null || lon == null) return;
+        updateVesselPosition(mmsi, lat, lon, meta.ShipName || '');
+      } catch (e) { /* ignore parse */ }
+    };
+    aisSocket.onclose = () => {
+      setAisStatus('AIS: reconnecting…', false);
+      setTimeout(connectAisStream, 8000);
+    };
+    aisSocket.onerror = () => setAisStatus('AIS: error', false);
+  } catch (e) {
+    setAisStatus('AIS: failed', false);
+    console.warn(e);
+  }
+}
+
+function updateVesselPosition(mmsi, lat, lon, name) {
+  if (!map) return;
+  const fleet = FERRY_FLEET.find(v => v.mmsi === mmsi);
+  if (!fleet) return;
+  const marker = ferryMarkers[mmsi];
+  if (marker) {
+    marker.setLatLng([lat, lon]);
+    marker.setPopupContent(
+      `<b style="color:${fleet.color}">${fleet.name}</b><br>MMSI ${mmsi}<br>` +
+      `${lat.toFixed(4)}, ${lon.toFixed(4)}<br><span style="color:#00ff88">Live AIS</span><br>` +
+      `<a href="${fleet.mt}" target="_blank" rel="noopener">MarineTraffic</a>`
+    );
+  }
+  if (!aisTracks[mmsi]) aisTracks[mmsi] = [];
+  aisTracks[mmsi].push([lat, lon]);
+  if (aisTracks[mmsi].length > 80) aisTracks[mmsi].shift();
+  // Update live track polyline
+  if (trackLayers[mmsi]) {
+    // Keep service corridor as base; overlay breadcrumb of actual path
+    if (!trackLayers[mmsi + '_live']) {
+      trackLayers[mmsi + '_live'] = L.polyline(aisTracks[mmsi], {
+        color: fleet.color, weight: 3, opacity: 0.95
+      }).addTo(map);
+    } else {
+      trackLayers[mmsi + '_live'].setLatLngs(aisTracks[mmsi]);
+    }
+  }
+}
+
 
 
 
@@ -792,7 +889,7 @@ renderFerry();
 loadDashboard({ softWebcam: false });
 connectWebSocket();
 // Map + HUD clock
-setTimeout(() => { initMap(); requestAnimationFrame(animateFerries); }, 100);
+setTimeout(() => { initMap(); connectAisStream(); }, 120);
 setInterval(() => {
   const el = document.getElementById('clock');
   if (el) el.textContent = new Date().toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: false }) + ' ET';
@@ -1019,23 +1116,28 @@ function openCamPlayer(camId) {
   if (!cam) return;
   const root = document.getElementById('modal-root');
   if (!root) return;
-  const src = cam.embed || cam.external;
+  let frame;
+  if (cam.youtube) {
+    frame = `<iframe class="cam-player-frame" src="https://www.youtube.com/embed/${cam.youtube}?autoplay=1&mute=1&playsinline=1&rel=0" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" allowfullscreen title="${cam.name}"></iframe>`;
+  } else {
+    const src = cam.embed || cam.external;
+    frame = `<iframe class="cam-player-frame" src="${src}" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen referrerpolicy="no-referrer-when-downgrade" title="${cam.name}"></iframe>`;
+  }
   root.innerHTML = `
     <div class="modal-backdrop open" id="modal-bg"></div>
-    <div class="modal-win wide open" role="dialog" aria-modal="true" style="z-index:10001">
+    <div class="modal-win wide open" role="dialog" aria-modal="true">
       <div class="modal-hd">
         <h2>▶ ${cam.name} <span style="font-weight:500;color:#8b929e;font-size:11px">· ${cam.loc}</span></h2>
         <div style="display:flex;gap:8px;align-items:center">
-          <a href="${cam.external}" target="_blank" rel="noopener" style="font-size:11px;color:#93c5fd">Open source ↗</a>
+          <a href="${cam.external}" target="_blank" rel="noopener" style="font-size:11px;color:#93c5fd">Source ↗</a>
           <button type="button" class="btn-x" id="modal-close" aria-label="Close">×</button>
         </div>
       </div>
       <div class="modal-bd" style="padding:8px">
-        <p style="font-size:11px;color:#8b929e;margin:0 0 8px">${cam.playerHint || ''} · Auto-loads feed below when the provider allows framing.</p>
-        <iframe class="cam-player-frame" src="${src}" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen referrerpolicy="no-referrer-when-downgrade" title="${cam.name} live"></iframe>
+        <p style="font-size:11px;color:#8b929e;margin:0 0 8px">${cam.playerHint || ''}</p>
+        ${frame}
       </div>
-    </div>
-  `;
+    </div>`;
   root.style.pointerEvents = 'auto';
   root.style.zIndex = '10000';
   document.getElementById('modal-close').onclick = closePanel;
@@ -1044,71 +1146,72 @@ function openCamPlayer(camId) {
 }
 window.openCamPlayer = openCamPlayer;
 
+
 function closeAllMenus() {
   document.querySelectorAll('.menu-wrap.open').forEach(w => w.classList.remove('open'));
 }
 
 function initMenus() {
-  document.querySelectorAll('.menu-wrap').forEach(wrap => {
-    const btn = wrap.querySelector('.menu-btn');
-    if (!btn) return;
-    btn.addEventListener('click', (e) => {
+  const nav = document.getElementById('main-menu');
+  if (!nav) return;
+  // Toggle open on menu button click
+  nav.addEventListener('click', (e) => {
+    const btn = e.target.closest('.menu-btn');
+    if (btn) {
+      e.preventDefault();
       e.stopPropagation();
-      const was = wrap.classList.contains('open');
+      const wrap = btn.closest('.menu-wrap');
+      const wasOpen = wrap.classList.contains('open');
       closeAllMenus();
-      if (!was) wrap.classList.add('open');
-    });
-  });
-  document.addEventListener('click', () => closeAllMenus());
-  document.querySelectorAll('.menu-drop [data-action]').forEach(item => {
-    item.addEventListener('click', (e) => {
+      if (!wasOpen) wrap.classList.add('open');
+      return;
+    }
+    const actionEl = e.target.closest('[data-action]');
+    if (actionEl) {
+      e.preventDefault();
       e.stopPropagation();
-      const action = item.getAttribute('data-action');
+      const action = actionEl.getAttribute('data-action');
       closeAllMenus();
       runMenuAction(action);
-    });
+    }
+  });
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#main-menu')) closeAllMenus();
   });
 }
 
 function runMenuAction(action) {
-  if (action === 'refresh') return loadDashboard({ softWebcam: true });
-  if (action === 'copy-link') {
-    navigator.clipboard?.writeText(location.href);
-    return;
-  }
-  if (action === 'print') return window.print();
+  console.log('menu action', action);
+  if (action === 'refresh') { loadDashboard({ softWebcam: true }); return; }
+  if (action === 'copy-link') { navigator.clipboard?.writeText(location.href).catch(()=>{}); return; }
+  if (action === 'print') { window.print(); return; }
   if (action === 'fullscreen') {
     if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
     else document.exitFullscreen?.();
     return;
   }
-  if (action === 'fit-bay') return fitBay();
-  if (action === 'toggle-tracks') {
-    document.getElementById('btn-tracks')?.click();
+  if (action === 'fit-bay') { fitBay(); return; }
+  if (action === 'toggle-tracks') { document.getElementById('btn-tracks')?.click(); return; }
+  if (action && action.startsWith('panel-')) { openPanel(action.slice(6)); return; }
+  if (action && action.startsWith('highlight-')) { highlightFerry(action.slice(10)); return; }
+  if (action === 'about') {
+    openInfoModal('About DE Coastal Control',
+      `<p>Mission-style dashboard for Delaware coastal beaches, state parks, and the Cape May–Lewes Ferry.</p>
+       <p style="margin-top:8px;color:#8b929e;font-size:12px">Live AIS via AISStream.io (free API key in config.js). Weather Open-Meteo · NWS · NOAA · NDBC · CMLF</p>`);
     return;
   }
-  if (action?.startsWith('panel-')) {
-    return openPanel(action.replace('panel-', ''));
-  }
-  if (action?.startsWith('highlight-')) {
-    return highlightFerry(action.replace('highlight-', ''));
-  }
-  if (action === 'about') {
-    return openInfoModal('About DE Coastal Control',
-      `<p>Mission-style dashboard for Delaware coastal beaches, state parks, and the Cape May–Lewes Ferry.</p>
-       <p style="margin-top:8px;color:#8b929e;font-size:12px">Weather: Open-Meteo · Alerts: NWS · Tides: NOAA CO-OPS · Marine: NDBC 44009 · Map: OSM/CARTO · Ferry: CMLF</p>
-       <p style="margin-top:8px;color:#8b929e;font-size:12px">Informational only. Verify conditions and swim near lifeguards.</p>`);
-  }
   if (action === 'about-data') {
-    return openInfoModal('Data sources',
+    openInfoModal('Data sources',
       `<ul style="font-size:12px;line-height:1.7;color:#c5cad3">
-        <li>Open-Meteo — weather & 7-day forecast</li>
+        <li><b>AISStream.io</b> — live ferry positions (free key required)</li>
+        <li>Open-Meteo — weather &amp; 7-day forecast</li>
         <li>api.weather.gov — active alerts</li>
         <li>NOAA CO-OPS — tide predictions</li>
         <li>NDBC buoy 44009 — water temp / waves</li>
-        <li>CMLF — ferry schedule & tracker links</li>
+        <li>CMLF — ferry schedule &amp; cams</li>
         <li>OSM + CARTO — basemap</li>
-      </ul>`);
+      </ul>
+      <p style="margin-top:10px;font-size:12px">Get a free AIS key: <a href="https://aisstream.io" target="_blank" rel="noopener" style="color:#93c5fd">aisstream.io</a> → paste into <code>config.js</code> as <code>AISSTREAM_API_KEY</code></p>`);
   }
 }
 
@@ -1127,4 +1230,5 @@ function openInfoModal(title, bodyHtml) {
   document.getElementById('modal-bg').onclick = closePanel;
   document.addEventListener('keydown', escClose);
 }
+
 

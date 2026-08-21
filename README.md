@@ -96,3 +96,15 @@ Health check: `GET /health`
 ## License
 
 Dashboard code: MIT. Upstream data remains under agency terms.
+
+
+## Live ferry positions (AISStream)
+
+1. Create a free account at [aisstream.io](https://aisstream.io)
+2. Copy your API key into `config.js`:
+
+```js
+AISSTREAM_API_KEY: 'your-key-here'
+```
+
+3. Reload the dashboard. Status shows **AIS: connected** and ferry markers move to real positions. Without a key, markers stay docked (no bounce animation).
