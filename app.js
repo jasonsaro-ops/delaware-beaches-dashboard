@@ -267,11 +267,16 @@ function initMap() {
         <a href="${v.tracker}" target="_blank" rel="noopener">CMLF</a>`);
   });
 
-  fitBay();
+  // Start zoomed on Cape May terminal (current overnight berth for fleet)
+  map.setView(TERMINAL_CM, 13);
 
   document.getElementById('btn-fit-bay')?.addEventListener('click', (e) => {
     e.stopPropagation();
     fitBay();
+  });
+  document.getElementById('btn-fit-cm')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    fitCapeMay();
   });
   document.getElementById('btn-tracks')?.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -302,6 +307,12 @@ function fitBay() {
   const bounds = L.latLngBounds([TERMINAL_CM, TERMINAL_LEWES]).pad(0.35);
   map.fitBounds(bounds);
 }
+function fitCapeMay() {
+  if (!map) return;
+  map.flyTo(TERMINAL_CM, 14, { duration: 0.6 });
+}
+window.fitCapeMay = fitCapeMay;
+
 
 // Soft animation of markers along track (visual underway trajectories)
 // Bounce animation removed — positions come from AISStream when configured
@@ -309,6 +320,8 @@ function animateFerries() { /* disabled */ }
 
 let aisSocket = null;
 const aisTracks = {}; // mmsi -> [[lat,lng], ...]
+const livePositions = {}; // mmsi -> {lat, lon, sog, cog, ts, name}
+
 
 function setAisStatus(msg, ok) {
   const el = document.getElementById('ais-status');
@@ -344,15 +357,22 @@ function connectAisStream() {
       try {
         const msg = JSON.parse(ev.data);
         if (msg.MessageType !== 'PositionReport') return;
-        const pr = msg.Message && msg.Message.PositionReport;
+        const pr = (msg.Message && msg.Message.PositionReport) || {};
         const meta = msg.MetaData || {};
-        const mmsi = String(meta.MMSI || pr?.UserID || '');
-        const lat = Number(meta.latitude ?? pr?.Latitude);
-        const lon = Number(meta.longitude ?? pr?.Longitude);
+        const mmsi = String(meta.MMSI || pr.UserID || '');
+        const lat = Number(meta.latitude != null ? meta.latitude : pr.Latitude);
+        const lon = Number(meta.longitude != null ? meta.longitude : pr.Longitude);
+        const sog = meta.sog != null ? meta.sog : pr.Sog;
+        const cog = meta.cog != null ? meta.cog : pr.Cog;
         if (!mmsi || !Number.isFinite(lat) || !Number.isFinite(lon)) return;
-        if (!gotFix) { gotFix = true; setAisStatus('AIS: live', true); }
-        updateVesselPosition(mmsi, lat, lon, meta.ShipName || '');
-      } catch (e) { /* ignore parse */ }
+        if (!gotFix) {
+          gotFix = true;
+          setAisStatus('AIS: live @ Cape May area', true);
+          // Zoom to Cape May terminal when first fix arrives (overnight layover typical)
+          if (map) map.flyTo([lat, lon], 14, { duration: 0.8 });
+        }
+        updateVesselPosition(mmsi, lat, lon, meta.ShipName || '', sog, cog);
+      } catch (e) { console.warn('AIS parse', e); }
     };
     aisSocket.onclose = () => {
       setAisStatus('AIS: reconnecting…', false);
@@ -365,26 +385,33 @@ function connectAisStream() {
   }
 }
 
-function updateVesselPosition(mmsi, lat, lon, name) {
-  if (!map) return;
+function updateVesselPosition(mmsi, lat, lon, name, sog, cog) {
   const fleet = FERRY_FLEET.find(v => v.mmsi === mmsi);
   if (!fleet) return;
-  const marker = ferryMarkers[mmsi];
-  if (marker) {
-    marker.setLatLng([lat, lon]);
-    marker.setPopupContent(
+  livePositions[mmsi] = {
+    lat, lon, sog: sog ?? null, cog: cog ?? null,
+    ts: Date.now(), name: name || fleet.name
+  };
+  if (map && ferryMarkers[mmsi]) {
+    ferryMarkers[mmsi].setLatLng([lat, lon]);
+    const spd = sog != null ? `${Number(sog).toFixed(1)} kn` : '—';
+    const course = cog != null ? `${Math.round(Number(cog))}°` : '—';
+    ferryMarkers[mmsi].setPopupContent(
       `<b style="color:${fleet.color}">${fleet.name}</b><br>MMSI ${mmsi}<br>` +
-      `${lat.toFixed(5)}, ${lon.toFixed(5)}<br><span style="color:#00ff88">● Live AIS position</span><br>` +
+      `${lat.toFixed(5)}, ${lon.toFixed(5)}<br>` +
+      `Speed ${spd} · Course ${course}<br>` +
+      `<span style="color:#00ff88">● Live AIS</span><br>` +
       `<a href="${fleet.mt}" target="_blank" rel="noopener">MarineTraffic</a> · ` +
       `<a href="${fleet.ais}" target="_blank" rel="noopener">VesselFinder</a>`
     );
   }
   if (!aisTracks[mmsi]) aisTracks[mmsi] = [];
-  aisTracks[mmsi].push([lat, lon]);
-  if (aisTracks[mmsi].length > 80) aisTracks[mmsi].shift();
-  // Update live track polyline
-  if (trackLayers[mmsi]) {
-    // Keep service corridor as base; overlay breadcrumb of actual path
+  const last = aisTracks[mmsi][aisTracks[mmsi].length - 1];
+  if (!last || last[0] !== lat || last[1] !== lon) {
+    aisTracks[mmsi].push([lat, lon]);
+    if (aisTracks[mmsi].length > 120) aisTracks[mmsi].shift();
+  }
+  if (map) {
     if (!trackLayers[mmsi + '_live']) {
       trackLayers[mmsi + '_live'] = L.polyline(aisTracks[mmsi], {
         color: fleet.color, weight: 3, opacity: 0.95
@@ -393,6 +420,7 @@ function updateVesselPosition(mmsi, lat, lon, name) {
       trackLayers[mmsi + '_live'].setLatLngs(aisTracks[mmsi]);
     }
   }
+  renderFerryLiveStrip();
 }
 
 
@@ -642,6 +670,32 @@ function renderParks() {
       <td class="py-0.5 text-ocean-400">${p.hours.replace('8 AM – Sunset','8a–sunset')} · ${p.fee.split('/')[0].trim()}</td>
     </tr>
   `).join('');
+}
+
+
+function renderFerryLiveStrip() {
+  const fleetEl = document.getElementById('ferry-fleet');
+  if (!fleetEl) return;
+  fleetEl.innerHTML = FERRY_FLEET.map(v => {
+    const live = livePositions[v.mmsi];
+    const pos = live
+      ? `<div class="mono" style="font-size:10px;color:#00ff88;margin-top:2px">${live.lat.toFixed(4)}, ${live.lon.toFixed(4)}</div>
+         <div style="font-size:9px;color:#8b929e">${live.sog != null ? live.sog.toFixed(1)+' kn' : '0 kn'} · ${live.cog != null ? Math.round(live.cog)+'°' : '—'} · ${timeAgo(live.ts)}</div>`
+      : `<div style="font-size:9px;color:#fbbf24;margin-top:2px">Awaiting AIS fix…</div>`;
+    return `<button type="button" class="chip ferry-chip w-full" data-mmsi="${v.mmsi}" style="border-color:${v.color}" onclick="highlightFerry('${v.mmsi}')">
+      <div class="font-semibold" style="color:${v.color};font-size:11px">${v.name}</div>
+      <div style="font-size:9px;color:#8b929e">MMSI ${v.mmsi}</div>
+      ${pos}
+    </button>`;
+  }).join('');
+}
+
+function timeAgo(ts) {
+  const s = Math.round((Date.now() - ts) / 1000);
+  if (s < 5) return 'just now';
+  if (s < 60) return s + 's ago';
+  if (s < 3600) return Math.floor(s/60) + 'm ago';
+  return Math.floor(s/3600) + 'h ago';
 }
 
 function renderFerry() {
