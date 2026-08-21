@@ -161,6 +161,146 @@ const FERRY_FLEET = [
 const FERRY_SCHEDULE_CM = ['7:00 AM', '8:30 AM', '10:30 AM', '12:00 PM', '1:00 PM', '2:30 PM', '4:30 PM', '6:00 PM'];
 const FERRY_SCHEDULE_LEWES = ['8:45 AM', '10:15 AM', '12:15 PM', '1:45 PM', '2:45 PM', '4:15 PM', '6:15 PM', '7:45 PM'];
 
+
+// ---------- Leaflet Delaware Bay map + ferry routes ----------
+const BAY_CENTER = [38.86, -75.05];
+const TERMINAL_CM = [38.9687, -74.9597];
+const TERMINAL_LEWES = [38.7824, -75.1199];
+// Approximate great-circle-ish waypoints for the published 17nm route
+const FERRY_ROUTE = [
+  TERMINAL_CM,
+  [38.94, -74.98],
+  [38.90, -75.02],
+  [38.86, -75.05],
+  [38.82, -75.08],
+  TERMINAL_LEWES
+];
+
+let map, routeLayer, trackLayers = {}, ferryMarkers = {}, showTracks = true;
+
+function initMap() {
+  const el = document.getElementById('map');
+  if (!el || map) return;
+  map = L.map('map', {
+    zoomControl: true,
+    attributionControl: true
+  }).setView(BAY_CENTER, 10);
+
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '&copy; OSM &copy; CARTO',
+    subdomains: 'abcd',
+    maxZoom: 19
+  }).addTo(map);
+
+  // Service route (shared corridor)
+  routeLayer = L.polyline(FERRY_ROUTE, {
+    color: '#3b82f6',
+    weight: 2,
+    opacity: 0.85,
+    dashArray: '8 6',
+    className: 'route-line'
+  }).addTo(map);
+
+  // Terminals
+  const termIcon = (label, color) => L.divIcon({
+    className: '',
+    html: `<div style="background:${color};color:#0a0a0a;font:600 9px JetBrains Mono,monospace;padding:2px 5px;border-radius:2px;white-space:nowrap;border:1px solid #fff3">${label}</div>`,
+    iconSize: [80, 18],
+    iconAnchor: [40, 9]
+  });
+  L.marker(TERMINAL_CM, { icon: termIcon('CAPE MAY', '#93c5fd') }).addTo(map).bindPopup('<b>Cape May Terminal</b><br>North Cape May, NJ');
+  L.marker(TERMINAL_LEWES, { icon: termIcon('LEWES', '#93c5fd') }).addTo(map).bindPopup('<b>Lewes Terminal</b><br>Lewes, DE');
+
+  // Per-vessel track (offset slightly for visual separation) + marker
+  FERRY_FLEET.forEach((v, idx) => {
+    const offset = (idx - 1) * 0.008;
+    const track = FERRY_ROUTE.map(([lat, lon]) => [lat + offset * 0.3, lon + offset]);
+    trackLayers[v.mmsi] = L.polyline(track, {
+      color: v.color,
+      weight: 2.5,
+      opacity: 0.75
+    }).addTo(map);
+
+    const icon = L.divIcon({
+      className: '',
+      html: `<div class="ship-label" style="border-color:${v.color};color:${v.color}">🚢 ${v.short}</div>`,
+      iconSize: [110, 20],
+      iconAnchor: [55, 10]
+    });
+    // Place markers along route at staggered positions (simulated underway)
+    const pos = track[Math.min(1 + idx * 2, track.length - 2)];
+    ferryMarkers[v.mmsi] = L.marker(pos, { icon }).addTo(map)
+      .bindPopup(`<b style="color:${v.color}">${v.name}</b><br>MMSI ${v.mmsi}<br>IMO ${v.imo}<br>
+        <a href="${v.mt}" target="_blank" rel="noopener">MarineTraffic</a> ·
+        <a href="${v.ais}" target="_blank" rel="noopener">VesselFinder</a> ·
+        <a href="${v.tracker}" target="_blank" rel="noopener">CMLF</a>`);
+  });
+
+  fitBay();
+
+  document.getElementById('btn-fit-bay')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    fitBay();
+  });
+  document.getElementById('btn-tracks')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    showTracks = !showTracks;
+    e.currentTarget.classList.toggle('active', showTracks);
+    Object.values(trackLayers).forEach(l => {
+      if (showTracks) l.addTo(map); else map.removeLayer(l);
+    });
+    if (showTracks) routeLayer.addTo(map); else map.removeLayer(routeLayer);
+  });
+
+  document.querySelectorAll('.ferry-tb').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const mmsi = btn.getAttribute('data-mmsi');
+      highlightFerry(mmsi);
+      const m = ferryMarkers[mmsi];
+      if (m && map) {
+        map.flyTo(m.getLatLng(), 12, { duration: 0.6 });
+        m.openPopup();
+      }
+    });
+  });
+}
+
+function fitBay() {
+  if (!map) return;
+  const bounds = L.latLngBounds([TERMINAL_CM, TERMINAL_LEWES]).pad(0.35);
+  map.fitBounds(bounds);
+}
+
+// Soft animation of markers along track (visual underway trajectories)
+let animT = 0;
+function animateFerries() {
+  if (!map) return;
+  animT = (animT + 0.002) % 1;
+  FERRY_FLEET.forEach((v, idx) => {
+    const layer = trackLayers[v.mmsi];
+    const marker = ferryMarkers[v.mmsi];
+    if (!layer || !marker) return;
+    const latlngs = layer.getLatLngs();
+    // Stagger phase so vessels appear at different points / directions
+    let t = (animT + idx * 0.33) % 1;
+    // Reverse direction for one vessel for visual variety
+    if (idx === 1) t = 1 - t;
+    const n = latlngs.length - 1;
+    const f = t * n;
+    const i = Math.floor(f);
+    const frac = f - i;
+    const a = latlngs[Math.min(i, n)];
+    const b = latlngs[Math.min(i + 1, n)];
+    const lat = a.lat + (b.lat - a.lat) * frac;
+    const lng = a.lng + (b.lng - a.lng) * frac;
+    marker.setLatLng([lat, lng]);
+  });
+  requestAnimationFrame(animateFerries);
+}
+
+
+
 // ---------- Helpers ----------
 function formatTime(isoOrDate) {
   const d = typeof isoOrDate === 'string' ? new Date(isoOrDate) : isoOrDate;
@@ -381,10 +521,10 @@ function renderWebcams() {
   const thumbs = document.getElementById('webcam-thumbs');
   if (!thumbs) return;
   thumbs.innerHTML = WEBCAMS.map(c => `
-    <a href="${c.external}" target="_blank" rel="noopener"
-       class="block rounded border border-ocean-700/60 bg-ocean-900/60 hover:border-ocean-500 px-1.5 py-1 transition">
-      <div class="text-[11px] font-medium text-white leading-tight">${c.name}</div>
-      <div class="text-[9px] text-ocean-400">${c.loc} · ${c.note}</div>
+    <a href="${c.external}" target="_blank" rel="noopener" class="cam-tile p-1.5">
+      <div class="text-[10px] font-semibold text-white">${c.name}</div>
+      <div class="text-[9px] text-[#6b7280]">${c.loc}</div>
+      <div class="text-[9px] text-blue-400 mt-1">Open live ↗</div>
     </a>
   `).join('');
 }
@@ -430,18 +570,24 @@ function renderFerry() {
 }
 
 function highlightFerry(mmsi) {
-  const base = 'https://www.marinetraffic.com/en/ais/embed/zoom:10/centery:38.85/centerx:-75.05/maptype:0/shownames:true/showmenu:false';
-  const src = `${base}/mmsi:${mmsi}`;
-  const iframe = document.getElementById('ais-iframe');
-  const modalIframe = document.getElementById('ais-iframe-modal');
-  if (iframe) iframe.src = src;
-  if (modalIframe) modalIframe.src = src;
-  document.querySelectorAll('.ferry-chip').forEach(b => {
+  document.querySelectorAll('.ferry-chip, .ferry-tb').forEach(b => {
     const active = b.getAttribute('data-mmsi') === mmsi;
-    const col = FERRY_FLEET.find(f => f.mmsi === mmsi)?.color || '#60a5d8';
-    b.style.outline = active ? `1px solid ${col}` : 'none';
-    b.style.outlineOffset = '1px';
+    b.classList.toggle('active', active);
+    const col = FERRY_FLEET.find(f => f.mmsi === mmsi)?.color || '#3b82f6';
+    if (b.classList.contains('ferry-chip')) {
+      b.style.outline = active ? `1px solid ${col}` : 'none';
+      b.style.outlineOffset = '1px';
+    }
   });
+  // Emphasize track
+  Object.entries(trackLayers).forEach(([id, layer]) => {
+    layer.setStyle({ weight: id === mmsi ? 4 : 2, opacity: id === mmsi ? 1 : 0.45 });
+  });
+  const m = ferryMarkers[mmsi];
+  if (m && map) {
+    map.flyTo(m.getLatLng(), 12, { duration: 0.5 });
+    m.openPopup();
+  }
 }
 window.highlightFerry = highlightFerry;
 
@@ -639,6 +785,16 @@ renderParks();
 renderFerry();
 loadDashboard({ softWebcam: false });
 connectWebSocket();
+// Map + HUD clock
+setTimeout(() => { initMap(); requestAnimationFrame(animateFerries); }, 100);
+setInterval(() => {
+  const el = document.getElementById('clock');
+  if (el) el.textContent = new Date().toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: false }) + ' ET';
+}, 1000);
+// Sidebar panel shortcuts
+document.querySelectorAll('.sidebar button[data-panel]').forEach(b => {
+  b.addEventListener('click', () => openPanel(b.getAttribute('data-panel')));
+});
 
 
 // ---------- Floating control-center windows ----------
@@ -773,18 +929,29 @@ function panelBody(id) {
       </div>`;
   }
   if (id === 'ais-map') {
-    return `<p class="text-xs text-ocean-400 mb-2">Live AIS on Delaware Bay. Click a vessel below to highlight it on the map.</p>
+    setTimeout(() => {
+      const el = document.getElementById('modal-map');
+      if (!el || !window.L) return;
+      if (window._modalMap) { try { window._modalMap.remove(); } catch(_){} }
+      window._modalMap = L.map(el).setView([38.86, -75.05], 10);
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(window._modalMap);
+      L.polyline([[38.9687,-74.9597],[38.94,-74.98],[38.90,-75.02],[38.86,-75.05],[38.82,-75.08],[38.7824,-75.1199]], { color:'#3b82f6', weight:2, dashArray:'8 6' }).addTo(window._modalMap);
+      FERRY_FLEET.forEach((v, idx) => {
+        const off = (idx - 1) * 0.008;
+        const track = [[38.9687,-74.9597],[38.94,-74.98],[38.90,-75.02],[38.86,-75.05],[38.82,-75.08],[38.7824,-75.1199]].map(([a,b]) => [a+off*0.3, b+off]);
+        L.polyline(track, { color: v.color, weight: 2.5, opacity: 0.8 }).addTo(window._modalMap);
+      });
+      L.marker([38.9687,-74.9597]).addTo(window._modalMap).bindPopup('Cape May Terminal');
+      L.marker([38.7824,-75.1199]).addTo(window._modalMap).bindPopup('Lewes Terminal');
+      setTimeout(() => window._modalMap.invalidateSize(), 100);
+    }, 80);
+    return `<p class="text-xs text-[#8b929e] mb-2">Delaware Bay operating area · Cape May ↔ Lewes (~17 nm). Colored tracks = vessel corridors. For live AIS radar positions use links below.</p>
       <div class="flex flex-wrap gap-2 mb-3">${FERRY_FLEET.map(v => `
-        <button type="button" onclick="highlightFerry('${v.mmsi}')" class="px-2 py-1 rounded text-xs font-semibold text-white border"
-          style="border-color:${v.color};background:${v.color}22">
-          <span class="inline-block w-2 h-2 rounded-full mr-1" style="background:${v.color}"></span>${v.name} · ${v.mmsi}
-        </button>`).join('')}</div>
-      <iframe id="ais-iframe-modal" class="map-frame" style="height:min(55vh,480px)"
-        src="https://www.marinetraffic.com/en/ais/embed/zoom:10/centery:38.85/centerx:-75.05/maptype:0/shownames:true/mmsi:366914210/showmenu:false"
-        title="AIS map expanded"></iframe>
+        <button type="button" onclick="highlightFerry('${v.mmsi}')" class="chip text-xs font-semibold" style="border-color:${v.color};color:${v.color}">${v.name} · ${v.mmsi}</button>`).join('')}</div>
+      <div id="modal-map" style="height:min(50vh,420px);border-radius:3px;border:1px solid #2e3440;background:#0d1117"></div>
       <div class="mt-3 flex flex-wrap gap-3 text-xs">
-        <a class="text-accent-gold underline" href="https://www.cmlf.com/track-the-ferry/" target="_blank" rel="noopener">Official CMLF vessel tracker</a>
-        ${FERRY_FLEET.map(v => `<a class="underline" style="color:${v.color}" href="${v.mt}" target="_blank" rel="noopener">${v.short}</a>`).join(' · ')}
+        <a class="text-blue-400 underline" href="https://www.cmlf.com/track-the-ferry/" target="_blank" rel="noopener">Official CMLF vessel tracker</a>
+        ${FERRY_FLEET.map(v => `<a class="underline" style="color:${v.color}" href="${v.mt}" target="_blank" rel="noopener">${v.short} AIS</a>`).join(' · ')}
       </div>`;
   }
   if (id === 'parks') {
