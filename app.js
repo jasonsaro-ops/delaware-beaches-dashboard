@@ -104,12 +104,12 @@ const PARKS = [
 ];
 
 const WEBCAMS = [
-  { id: 'atlantic-sands', name: 'Atlantic Sands', loc: 'Rehoboth', embed: null, external: 'https://www.visitdebeaches.com/webcams/live-boardwalk-cam-atlantic-sands-hotel-in-rehoboth-beach/', note: 'Boardwalk / ocean' },
-  { id: 'cmlf-lewes', name: 'CMLF Ferry cams', loc: 'Lewes / CM', embed: null, external: 'https://www.cmlf.com/check-traffic-live-webcam-feeds/', note: 'Terminals & bay' },
-  { id: 'bethany-town', name: 'Bethany Beach', loc: 'Bethany', embed: null, external: 'https://www.townofbethanybeach.com/', note: 'Boardwalk' },
-  { id: 'sea-colony', name: 'Sea Colony', loc: 'Bethany', embed: null, external: 'https://www.seacolony.com/', note: 'Oceanfront' },
-  { id: 'dewey-bay', name: 'Bay Resort', loc: 'Dewey', embed: null, external: 'https://bayresort.com/', note: 'Rehoboth Bay' },
-  { id: 'deldot', name: 'DelDOT cams', loc: 'Route 1', embed: null, external: 'https://deldot.gov/map/', note: 'Traffic / inlet' }
+  { id: 'atlantic-sands', name: 'Atlantic Sands', loc: 'Rehoboth', embed: null, external: 'https://www.visitdebeaches.com/webcams/live-boardwalk-cam-atlantic-sands-hotel-in-rehoboth-beach/', note: 'Boardwalk / ocean', playerHint: 'Provider blocks embed — live page opens in player frame' },
+  { id: 'cmlf-lewes', name: 'CMLF Ferry cams', loc: 'Lewes / CM', embed: 'https://www.cmlf.com/check-traffic-live-webcam-feeds/', external: 'https://www.cmlf.com/check-traffic-live-webcam-feeds/', note: 'Terminals & bay', playerHint: 'Official ferry terminal camera page' },
+  { id: 'bethany-town', name: 'Bethany Beach', loc: 'Bethany', embed: null, external: 'https://www.townofbethanybeach.com/', note: 'Boardwalk', playerHint: 'Town site — open live section' },
+  { id: 'sea-colony', name: 'Sea Colony', loc: 'Bethany', embed: null, external: 'https://www.seacolony.com/', note: 'Oceanfront', playerHint: 'Resort site cam links' },
+  { id: 'dewey-bay', name: 'Bay Resort', loc: 'Dewey', embed: null, external: 'https://bayresort.com/', note: 'Rehoboth Bay', playerHint: 'Bay cam on resort site' },
+  { id: 'deldot', name: 'DelDOT cams', loc: 'Route 1', embed: 'https://deldot.gov/map/', external: 'https://deldot.gov/map/', note: 'Traffic / inlet', playerHint: 'Statewide traffic camera map' }
 ];
 
 
@@ -521,12 +521,18 @@ function renderWebcams() {
   const thumbs = document.getElementById('webcam-thumbs');
   if (!thumbs) return;
   thumbs.innerHTML = WEBCAMS.map(c => `
-    <a href="${c.external}" target="_blank" rel="noopener" class="cam-tile p-1.5">
+    <button type="button" class="cam-tile p-1.5 w-full" data-cam="${c.id}">
       <div class="text-[10px] font-semibold text-white">${c.name}</div>
       <div class="text-[9px] text-[#6b7280]">${c.loc}</div>
-      <div class="text-[9px] text-blue-400 mt-1">Open live ↗</div>
-    </a>
+      <div class="text-[9px] text-blue-400 mt-1">▶ Play in window</div>
+    </button>
   `).join('');
+  thumbs.querySelectorAll('[data-cam]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openCamPlayer(btn.getAttribute('data-cam'));
+    });
+  });
 }
 
 function renderParks() {
@@ -795,6 +801,7 @@ setInterval(() => {
 document.querySelectorAll('.sidebar button[data-panel]').forEach(b => {
   b.addEventListener('click', () => openPanel(b.getAttribute('data-panel')));
 });
+initMenus();
 
 
 // ---------- Floating control-center windows ----------
@@ -829,6 +836,7 @@ function openPanel(id) {
     </div>
   `;
   root.style.pointerEvents = 'auto';
+  root.style.zIndex = '10000';
   document.getElementById('modal-close').onclick = closePanel;
   document.getElementById('modal-bg').onclick = closePanel;
   document.addEventListener('keydown', escClose);
@@ -924,8 +932,7 @@ function panelBody(id) {
       </div>
       <p class="text-xs text-ocean-400">Schedule is a summer midweek pattern — always confirm on <a class="underline text-ocean-300" href="https://www.cmlf.com/schedules-fares/" target="_blank" rel="noopener">cmlf.com</a>. Crossing ~85 min. Reservations recommended.</p>
       <div class="mt-4">
-        <div class="text-xs text-ocean-400 mb-1">Ferry terminal cams (official page)</div>
-        <iframe class="map-frame" src="https://www.cmlf.com/check-traffic-live-webcam-feeds/" title="CMLF cams"></iframe>
+        <button type="button" onclick="openCamPlayer('cmlf-lewes')" class="chip" style="border-color:#3b82f6;color:#93c5fd">▶ Open CMLF ferry cams in player</button>
       </div>`;
   }
   if (id === 'ais-map') {
@@ -963,15 +970,13 @@ function panelBody(id) {
       <p class="text-xs text-ocean-500 mt-3">Confirm temporary closures at <a class="underline" href="https://destateparks.com" target="_blank" rel="noopener">destateparks.com</a></p>`;
   }
   if (id === 'cams') {
-    return `<p class="text-xs text-ocean-400 mb-3">Most providers block third-party embeds. Open live feeds below. Ferry terminal page may load inside the frame when allowed.</p>
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">${WEBCAMS.map(cam => `
-        <a href="${cam.external}" target="_blank" rel="noopener" class="block rounded-lg border border-ocean-700 bg-ocean-900/50 p-3 hover:border-ocean-500">
+    return `<p class="text-xs text-[#8b929e] mb-3">Click a camera to open it in a floating player window.</p>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">${WEBCAMS.map(cam => `
+        <button type="button" onclick="openCamPlayer('${cam.id}')" class="chip text-left p-3" style="border-color:#3a4150">
           <div class="font-medium text-white">${cam.name}</div>
-          <div class="text-xs text-ocean-400">${cam.loc} · ${cam.note}</div>
-          <div class="text-xs text-accent-gold mt-1">Open live feed ↗</div>
-        </a>`).join('')}</div>
-      <div class="text-xs text-ocean-400 mb-1">CMLF terminal cams page</div>
-      <iframe class="map-frame" src="https://www.cmlf.com/check-traffic-live-webcam-feeds/" title="Ferry cams"></iframe>`;
+          <div class="text-xs text-[#8b929e]">${cam.loc} · ${cam.note}</div>
+          <div class="text-xs text-blue-400 mt-1">▶ Play in window</div>
+        </button>`).join('')}</div>`;
   }
   if (id === 'alerts') {
     const feats = p.alerts?.features || [];
@@ -1007,3 +1012,119 @@ document.querySelectorAll('[data-panel]').forEach(el => {
 
 // expose for inline buttons
 window.openPanel = openPanel;
+
+
+function openCamPlayer(camId) {
+  const cam = WEBCAMS.find(c => c.id === camId);
+  if (!cam) return;
+  const root = document.getElementById('modal-root');
+  if (!root) return;
+  const src = cam.embed || cam.external;
+  root.innerHTML = `
+    <div class="modal-backdrop open" id="modal-bg"></div>
+    <div class="modal-win wide open" role="dialog" aria-modal="true" style="z-index:10001">
+      <div class="modal-hd">
+        <h2>▶ ${cam.name} <span style="font-weight:500;color:#8b929e;font-size:11px">· ${cam.loc}</span></h2>
+        <div style="display:flex;gap:8px;align-items:center">
+          <a href="${cam.external}" target="_blank" rel="noopener" style="font-size:11px;color:#93c5fd">Open source ↗</a>
+          <button type="button" class="btn-x" id="modal-close" aria-label="Close">×</button>
+        </div>
+      </div>
+      <div class="modal-bd" style="padding:8px">
+        <p style="font-size:11px;color:#8b929e;margin:0 0 8px">${cam.playerHint || ''} · Auto-loads feed below when the provider allows framing.</p>
+        <iframe class="cam-player-frame" src="${src}" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen referrerpolicy="no-referrer-when-downgrade" title="${cam.name} live"></iframe>
+      </div>
+    </div>
+  `;
+  root.style.pointerEvents = 'auto';
+  root.style.zIndex = '10000';
+  document.getElementById('modal-close').onclick = closePanel;
+  document.getElementById('modal-bg').onclick = closePanel;
+  document.addEventListener('keydown', escClose);
+}
+window.openCamPlayer = openCamPlayer;
+
+function closeAllMenus() {
+  document.querySelectorAll('.menu-wrap.open').forEach(w => w.classList.remove('open'));
+}
+
+function initMenus() {
+  document.querySelectorAll('.menu-wrap').forEach(wrap => {
+    const btn = wrap.querySelector('.menu-btn');
+    if (!btn) return;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const was = wrap.classList.contains('open');
+      closeAllMenus();
+      if (!was) wrap.classList.add('open');
+    });
+  });
+  document.addEventListener('click', () => closeAllMenus());
+  document.querySelectorAll('.menu-drop [data-action]').forEach(item => {
+    item.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const action = item.getAttribute('data-action');
+      closeAllMenus();
+      runMenuAction(action);
+    });
+  });
+}
+
+function runMenuAction(action) {
+  if (action === 'refresh') return loadDashboard({ softWebcam: true });
+  if (action === 'copy-link') {
+    navigator.clipboard?.writeText(location.href);
+    return;
+  }
+  if (action === 'print') return window.print();
+  if (action === 'fullscreen') {
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
+    else document.exitFullscreen?.();
+    return;
+  }
+  if (action === 'fit-bay') return fitBay();
+  if (action === 'toggle-tracks') {
+    document.getElementById('btn-tracks')?.click();
+    return;
+  }
+  if (action?.startsWith('panel-')) {
+    return openPanel(action.replace('panel-', ''));
+  }
+  if (action?.startsWith('highlight-')) {
+    return highlightFerry(action.replace('highlight-', ''));
+  }
+  if (action === 'about') {
+    return openInfoModal('About DE Coastal Control',
+      `<p>Mission-style dashboard for Delaware coastal beaches, state parks, and the Cape May–Lewes Ferry.</p>
+       <p style="margin-top:8px;color:#8b929e;font-size:12px">Weather: Open-Meteo · Alerts: NWS · Tides: NOAA CO-OPS · Marine: NDBC 44009 · Map: OSM/CARTO · Ferry: CMLF</p>
+       <p style="margin-top:8px;color:#8b929e;font-size:12px">Informational only. Verify conditions and swim near lifeguards.</p>`);
+  }
+  if (action === 'about-data') {
+    return openInfoModal('Data sources',
+      `<ul style="font-size:12px;line-height:1.7;color:#c5cad3">
+        <li>Open-Meteo — weather & 7-day forecast</li>
+        <li>api.weather.gov — active alerts</li>
+        <li>NOAA CO-OPS — tide predictions</li>
+        <li>NDBC buoy 44009 — water temp / waves</li>
+        <li>CMLF — ferry schedule & tracker links</li>
+        <li>OSM + CARTO — basemap</li>
+      </ul>`);
+  }
+}
+
+function openInfoModal(title, bodyHtml) {
+  const root = document.getElementById('modal-root');
+  if (!root) return;
+  root.innerHTML = `
+    <div class="modal-backdrop open" id="modal-bg"></div>
+    <div class="modal-win open" role="dialog">
+      <div class="modal-hd"><h2>${title}</h2><button type="button" class="btn-x" id="modal-close">×</button></div>
+      <div class="modal-bd">${bodyHtml}</div>
+    </div>`;
+  root.style.pointerEvents = 'auto';
+  root.style.zIndex = '10000';
+  document.getElementById('modal-close').onclick = closePanel;
+  document.getElementById('modal-bg').onclick = closePanel;
+  document.addEventListener('keydown', escClose);
+}
+

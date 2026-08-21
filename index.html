@@ -64,9 +64,10 @@
     }
     .sidebar button:hover, .sidebar button.active { background: #2a303c; color: #3b82f6; }
     .main { grid-area: main; min-height: 0; display: grid;
-      grid-template-columns: 1fr 1fr 1.15fr 0.95fr;
-      grid-template-rows: 1fr 1fr 1.25fr;
+      grid-template-columns: 1fr 1fr 1fr 1fr;
+      grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.45fr);
       gap: 3px; padding: 3px; background: #12151a; }
+    .map-panel { grid-column: 1 / -1; grid-row: 3; }
     .status { grid-area: status; background: #15181e; border-top: 1px solid #2e3440;
       display: flex; align-items: center; justify-content: space-between; padding: 0 10px;
       font-size: 10px; color: #6b7280; }
@@ -104,7 +105,7 @@
     }
     .route-line { stroke-dasharray: 8 6; }
     /* Modal */
-    #modal-root { position: fixed; inset: 0; z-index: 200; pointer-events: none; }
+    #modal-root { position: fixed; inset: 0; z-index: 10000; pointer-events: none; }
     .modal-backdrop { position: absolute; inset: 0; background: rgba(10,12,16,.75); pointer-events: auto; }
     .modal-win {
       position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
@@ -136,19 +137,94 @@
     .alert-bar { background: #3f1212; border-bottom: 1px solid #7f1d1d; color: #fecaca;
       font-size: 11px; padding: 3px 10px; display: none; }
     .alert-bar.show { display: block; }
+    .menu-wrap { position: relative; }
+    .menu-drop {
+      display: none; position: absolute; top: 100%; left: 0; min-width: 180px;
+      background: #22262e; border: 1px solid #3a4150; border-radius: 4px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.45); z-index: 11000; padding: 4px 0;
+    }
+    .menu-wrap.open .menu-drop { display: block; }
+    .menu-drop button, .menu-drop a {
+      display: block; width: 100%; text-align: left; background: none; border: none;
+      color: #e8eaed; font-size: 12px; padding: 7px 14px; cursor: pointer; text-decoration: none;
+    }
+    .menu-drop button:hover, .menu-drop a:hover { background: #2a303c; color: #93c5fd; }
+    .menu-drop .sep { height: 1px; background: #2e3440; margin: 4px 0; }
+    .cam-player-frame { width: 100%; height: min(55vh, 480px); border: 0; border-radius: 4px; background: #0d1117; }
+
   </style>
 </head>
 <body class="cc">
   <!-- Menu bar -->
   <div class="menubar">
     <span class="brand">DE Coastal Control</span>
-    <nav class="flex gap-0.5">
-      <button type="button">File</button>
-      <button type="button">View</button>
-      <button type="button">Map</button>
-      <button type="button">Fleet</button>
-      <button type="button">Tools</button>
-      <button type="button">Help</button>
+    <nav class="flex gap-0.5" id="main-menu">
+      <div class="menu-wrap" data-menu="file">
+        <button type="button" class="menu-btn">File</button>
+        <div class="menu-drop">
+          <button type="button" data-action="refresh">Refresh data</button>
+          <button type="button" data-action="copy-link">Copy dashboard link</button>
+          <div class="sep"></div>
+          <button type="button" data-action="print">Print / Save PDF</button>
+        </div>
+      </div>
+      <div class="menu-wrap" data-menu="view">
+        <button type="button" class="menu-btn">View</button>
+        <div class="menu-drop">
+          <button type="button" data-action="panel-snapshot">Regional snapshot</button>
+          <button type="button" data-action="panel-beaches">Beach conditions</button>
+          <button type="button" data-action="panel-forecast">7-day outlook</button>
+          <button type="button" data-action="panel-tides">Tides</button>
+          <button type="button" data-action="panel-marine">Marine &amp; water</button>
+          <button type="button" data-action="panel-parks">Coastal parks</button>
+          <button type="button" data-action="panel-cams">Live cams</button>
+          <div class="sep"></div>
+          <button type="button" data-action="fullscreen">Toggle fullscreen</button>
+        </div>
+      </div>
+      <div class="menu-wrap" data-menu="map">
+        <button type="button" class="menu-btn">Map</button>
+        <div class="menu-drop">
+          <button type="button" data-action="fit-bay">Fit Delaware Bay</button>
+          <button type="button" data-action="toggle-tracks">Toggle tracks</button>
+          <button type="button" data-action="panel-ais-map">Expand map</button>
+          <div class="sep"></div>
+          <a href="https://www.marinetraffic.com/en/ais/home/centerx:-75.05/centery:38.85/zoom:10" target="_blank" rel="noopener">Open MarineTraffic ↗</a>
+          <a href="https://www.cmlf.com/track-the-ferry/" target="_blank" rel="noopener">CMLF tracker ↗</a>
+        </div>
+      </div>
+      <div class="menu-wrap" data-menu="fleet">
+        <button type="button" class="menu-btn">Fleet</button>
+        <div class="menu-drop">
+          <button type="button" data-action="highlight-366914210">Highlight MV Delaware</button>
+          <button type="button" data-action="highlight-366914190">Highlight MV New Jersey</button>
+          <button type="button" data-action="highlight-366914180">Highlight MV Cape Henlopen</button>
+          <div class="sep"></div>
+          <button type="button" data-action="panel-ferry">Ferry schedule &amp; fleet</button>
+          <a href="https://www.cmlf.com/schedules-fares/" target="_blank" rel="noopener">Official schedule ↗</a>
+          <a href="https://www.booking.cmlf.com/book/booking/journeySearch/" target="_blank" rel="noopener">Book passage ↗</a>
+        </div>
+      </div>
+      <div class="menu-wrap" data-menu="tools">
+        <button type="button" class="menu-btn">Tools</button>
+        <div class="menu-drop">
+          <button type="button" data-action="refresh">Force refresh</button>
+          <button type="button" data-action="panel-alerts">Active alerts</button>
+          <a href="https://www.weather.gov/phi/" target="_blank" rel="noopener">NWS Philadelphia ↗</a>
+          <a href="https://tidesandcurrents.noaa.gov/stationhome.html?id=8557380" target="_blank" rel="noopener">NOAA Lewes tides ↗</a>
+          <a href="https://www.ndbc.noaa.gov/station_page.php?station=44009" target="_blank" rel="noopener">NDBC Buoy 44009 ↗</a>
+        </div>
+      </div>
+      <div class="menu-wrap" data-menu="help">
+        <button type="button" class="menu-btn">Help</button>
+        <div class="menu-drop">
+          <button type="button" data-action="about">About this dashboard</button>
+          <a href="https://www.cmlf.com/" target="_blank" rel="noopener">Cape May–Lewes Ferry ↗</a>
+          <a href="https://destateparks.com/" target="_blank" rel="noopener">DE State Parks ↗</a>
+          <div class="sep"></div>
+          <button type="button" data-action="about-data">Data sources</button>
+        </div>
+      </div>
     </nav>
     <div class="flex-1"></div>
     <span class="mono text-[11px] text-hud-mute" id="clock">--:--:-- ET</span>
@@ -253,7 +329,7 @@
     </div>
 
     <!-- MAP: Delaware Bay + routes + AIS links -->
-    <div class="panel span2" data-panel="ais-map" style="cursor:default">
+    <div class="panel map-panel" data-panel="ais-map" style="cursor:default">
       <div class="panel-hd">
         <span>Delaware Bay · ship traffic &amp; ferry routes</span>
         <span class="flex items-center gap-2">
