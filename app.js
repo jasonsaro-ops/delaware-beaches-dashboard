@@ -244,26 +244,24 @@ function initMap() {
   L.marker(TERMINAL_CM, { icon: termIcon('CAPE MAY', '#93c5fd') }).addTo(map).bindPopup('<b>Cape May Terminal</b><br>North Cape May, NJ');
   L.marker(TERMINAL_LEWES, { icon: termIcon('LEWES', '#93c5fd') }).addTo(map).bindPopup('<b>Lewes Terminal</b><br>Lewes, DE');
 
-  // Per-vessel track (offset slightly for visual separation) + marker
-  FERRY_FLEET.forEach((v, idx) => {
-    const offset = (idx - 1) * 0.008;
-    const track = FERRY_ROUTE.map(([lat, lon]) => [lat + offset * 0.3, lon + offset]);
-    trackLayers[v.mmsi] = L.polyline(track, {
-      color: v.color,
-      weight: 2.5,
-      opacity: 0.75
-    }).addTo(map);
-
+  // Park all fleet markers at Cape May slips until live AIS updates arrive.
+  // Slight offsets so labels do not stack when moored together.
+  const CM_SLIPS = {
+    '366914210': [38.9692, -74.9605], // MV Delaware
+    '366914190': [38.9686, -74.9595], // MV New Jersey
+    '366914180': [38.9680, -74.9585]  // MV Cape Henlopen
+  };
+  FERRY_FLEET.forEach((v) => {
     const icon = L.divIcon({
       className: '',
       html: `<div class="ship-label" style="border-color:${v.color};color:${v.color}">🚢 ${v.short}</div>`,
       iconSize: [110, 20],
       iconAnchor: [55, 10]
     });
-    // Place markers along route at staggered positions (simulated underway)
-    const pos = track[Math.min(1 + idx * 2, track.length - 2)];
+    const pos = CM_SLIPS[v.mmsi] || TERMINAL_CM;
     ferryMarkers[v.mmsi] = L.marker(pos, { icon }).addTo(map)
       .bindPopup(`<b style="color:${v.color}">${v.name}</b><br>MMSI ${v.mmsi}<br>IMO ${v.imo}<br>
+        <span style="color:#fbbf24">Awaiting live AIS…</span><br>
         <a href="${v.mt}" target="_blank" rel="noopener">MarineTraffic</a> ·
         <a href="${v.ais}" target="_blank" rel="noopener">VesselFinder</a> ·
         <a href="${v.tracker}" target="_blank" rel="noopener">CMLF</a>`);
@@ -323,25 +321,25 @@ function connectAisStream() {
   const key = (window.DASHBOARD_CONFIG && window.DASHBOARD_CONFIG.AISSTREAM_API_KEY || '').trim();
   if (!key) {
     setAisStatus('AIS: add key in config.js', false);
-    // Park markers at terminals (static — not bouncing)
-    if (ferryMarkers['366914210']) ferryMarkers['366914210'].setLatLng(TERMINAL_CM);
-    if (ferryMarkers['366914190']) ferryMarkers['366914190'].setLatLng(TERMINAL_LEWES);
-    if (ferryMarkers['366914180']) ferryMarkers['366914180'].setLatLng([(TERMINAL_CM[0]+TERMINAL_LEWES[0])/2, (TERMINAL_CM[1]+TERMINAL_LEWES[1])/2]);
     return;
   }
   try {
     if (aisSocket) try { aisSocket.close(); } catch(_){}
+    setAisStatus('AIS: connecting…', false);
     aisSocket = new WebSocket('wss://stream.aisstream.io/v0/stream');
     aisSocket.onopen = () => {
-      setAisStatus('AIS: connected', true);
+      setAisStatus('AIS: subscribed', true);
+      // Delaware Bay + both terminals (Cape May & Lewes)
       const sub = {
         APIKey: key,
-        BoundingBoxes: [[[38.70, -75.25], [39.05, -74.85]]],
-        FiltersShipMMSI: FERRY_FLEET.map(v => v.mmsi),
+        Apikey: key,
+        BoundingBoxes: [[[38.70, -75.30], [39.10, -74.80]]],
+        FiltersShipMMSI: FERRY_FLEET.map(v => String(v.mmsi)),
         FilterMessageTypes: ['PositionReport']
       };
       aisSocket.send(JSON.stringify(sub));
     };
+    let gotFix = false;
     aisSocket.onmessage = (ev) => {
       try {
         const msg = JSON.parse(ev.data);
@@ -349,9 +347,10 @@ function connectAisStream() {
         const pr = msg.Message && msg.Message.PositionReport;
         const meta = msg.MetaData || {};
         const mmsi = String(meta.MMSI || pr?.UserID || '');
-        const lat = meta.latitude ?? pr?.Latitude;
-        const lon = meta.longitude ?? pr?.Longitude;
-        if (!mmsi || lat == null || lon == null) return;
+        const lat = Number(meta.latitude ?? pr?.Latitude);
+        const lon = Number(meta.longitude ?? pr?.Longitude);
+        if (!mmsi || !Number.isFinite(lat) || !Number.isFinite(lon)) return;
+        if (!gotFix) { gotFix = true; setAisStatus('AIS: live', true); }
         updateVesselPosition(mmsi, lat, lon, meta.ShipName || '');
       } catch (e) { /* ignore parse */ }
     };
@@ -375,8 +374,9 @@ function updateVesselPosition(mmsi, lat, lon, name) {
     marker.setLatLng([lat, lon]);
     marker.setPopupContent(
       `<b style="color:${fleet.color}">${fleet.name}</b><br>MMSI ${mmsi}<br>` +
-      `${lat.toFixed(4)}, ${lon.toFixed(4)}<br><span style="color:#00ff88">Live AIS</span><br>` +
-      `<a href="${fleet.mt}" target="_blank" rel="noopener">MarineTraffic</a>`
+      `${lat.toFixed(5)}, ${lon.toFixed(5)}<br><span style="color:#00ff88">● Live AIS position</span><br>` +
+      `<a href="${fleet.mt}" target="_blank" rel="noopener">MarineTraffic</a> · ` +
+      `<a href="${fleet.ais}" target="_blank" rel="noopener">VesselFinder</a>`
     );
   }
   if (!aisTracks[mmsi]) aisTracks[mmsi] = [];
