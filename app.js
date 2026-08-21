@@ -103,46 +103,14 @@ const PARKS = [
   }
 ];
 
-const WEBCAMS = [
-  {
-    id: 'bethany-yt',
-    name: 'Bethany Beach',
-    loc: 'Bethany',
-    youtube: 'cz1yy0PD_cc',
-    external: 'https://www.youtube.com/watch?v=cz1yy0PD_cc',
-    note: 'HD Beach Cams',
-    playerHint: 'YouTube live / recorded beach cam'
-  },
-  {
-    id: 'cmlf-lewes',
-    name: 'CMLF Ferry cams',
-    loc: 'Lewes / CM',
-    youtube: null,
-    embed: 'https://www.cmlf.com/check-traffic-live-webcam-feeds/',
-    external: 'https://www.cmlf.com/check-traffic-live-webcam-feeds/',
-    note: 'Official terminal cams',
-    playerHint: 'CMLF multi-cam page (plays when provider allows)'
-  },
-  {
-    id: 'atlantic-sands',
-    name: 'Atlantic Sands',
-    loc: 'Rehoboth',
-    youtube: null,
-    embed: null,
-    external: 'https://www.visitdebeaches.com/webcams/live-boardwalk-cam-atlantic-sands-hotel-in-rehoboth-beach/',
-    note: 'Boardwalk / ocean',
-    playerHint: 'No public YouTube feed — opens provider page in frame'
-  },
-  {
-    id: 'deldot',
-    name: 'DelDOT cams',
-    loc: 'Route 1 / Inlet',
-    youtube: null,
-    embed: 'https://deldot.gov/map/',
-    external: 'https://deldot.gov/map/',
-    note: 'Traffic cameras',
-    playerHint: 'Statewide camera map'
-  }
+// DE-1 / Coastal Highway corridor (Sussex beach approach) — factual reference + DelDOT links
+const RT1_SEGMENTS = [
+  { id: 'five-points', name: 'Five Points', loc: 'US 9 / DE 1', note: 'Major merge · beach bottleneck', aadt: '~45k AADT (peak season higher)' },
+  { id: 'nassau', name: 'Nassau', loc: 'DE 1 @ DE 14', note: 'Approach to Lewes / Rehoboth', aadt: 'High weekend demand' },
+  { id: 'rehoboth-ave', name: 'Rehoboth Ave', loc: 'DE 1A interchange', note: 'Primary Rehoboth Beach exit', aadt: 'Congested Fri PM / Sun PM' },
+  { id: 'dewey', name: 'Dewey Beach', loc: 'DE 1 / King Charles', note: 'Coastal strip · events', aadt: 'Summer peak severe' },
+  { id: 'inlet', name: 'Indian River Inlet', loc: 'Charles W. Cullen Br.', note: 'Seashore SP · bridge', aadt: 'Cameras on DelDOT map' },
+  { id: 'bethany', name: 'Bethany / Fenwick', loc: 'DE 1 south', note: 'Town centers on corridor', aadt: 'Weekend surge' }
 ];
 
 
@@ -642,23 +610,58 @@ function renderWater(buoy) {
 let activeWebcamId = null;
 function softRefreshWebcam() { /* no embeds — links only */ }
 function selectWebcam() {}
-function renderWebcams() {
-  const thumbs = document.getElementById('webcam-thumbs');
-  if (!thumbs) return;
-  thumbs.innerHTML = WEBCAMS.map(c => `
-    <button type="button" class="cam-tile p-1.5 w-full" data-cam="${c.id}">
-      <div class="text-[10px] font-semibold text-white">${c.name}</div>
-      <div class="text-[9px] text-[#6b7280]">${c.loc}</div>
-      <div class="text-[9px] text-blue-400 mt-1">▶ Play in window</div>
-    </button>
-  `).join('');
-  thumbs.querySelectorAll('[data-cam]').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      openCamPlayer(btn.getAttribute('data-cam'));
-    });
-  });
+function renderTraffic() {
+  const el = document.getElementById('traffic-panel');
+  if (!el) return;
+  el.innerHTML = `
+    <div class="flex items-center justify-between mb-1">
+      <span class="label">Corridor status</span>
+      <a href="https://deldot.gov/Traffic/travel_advisory/" target="_blank" rel="noopener" class="text-blue-400 hover:underline" style="font-size:9px">DelDOT advisories ↗</a>
+    </div>
+    <div id="traffic-advisory" class="mb-1.5 p-1.5 rounded border border-[#2e3440] bg-[#1a1d23] text-[10px] text-[#c5cad3]">
+      Checking DelDOT travel advisories…
+    </div>
+    <div class="label mb-0.5">Key DE-1 segments (beach approach)</div>
+    ${RT1_SEGMENTS.map(s => `
+      <div class="flex justify-between gap-1 border-b border-[#2e3440]/60 py-0.5">
+        <div>
+          <div class="font-medium text-white">${s.name}</div>
+          <div class="text-[#6b7280]">${s.loc} · ${s.note}</div>
+        </div>
+        <div class="text-right text-[#8b929e] mono shrink-0">${s.aadt}</div>
+      </div>
+    `).join('')}
+    <div class="mt-1.5 flex flex-wrap gap-1.5">
+      <a href="https://deldot.gov/map/" target="_blank" rel="noopener" class="chip text-[9px]" style="border-color:#3b82f6;color:#93c5fd">DelDOT live map</a>
+      <a href="https://deldot.gov/Traffic/travel_advisory/" target="_blank" rel="noopener" class="chip text-[9px]" style="border-color:#3a4150">Travel advisories</a>
+      <a href="https://www.debeachtraffic.com/" target="_blank" rel="noopener" class="chip text-[9px]" style="border-color:#3a4150">Beach traffic cams site</a>
+    </div>
+  `;
+  loadTrafficAdvisory();
 }
+
+async function loadTrafficAdvisory() {
+  const box = document.getElementById('traffic-advisory');
+  if (!box) return;
+  // DelDOT does not expose a free CORS JSON feed; surface official links + seasonal facts.
+  const hour = new Date().toLocaleString('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false });
+  const h = parseInt(hour, 10);
+  const day = new Date().toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short' });
+  const summer = [5,6,7,8].includes(new Date().getMonth() + 1); // rough
+  let tip = 'Check DelDOT for active incidents. ';
+  if (summer && (day === 'Fri' || day === 'Sat' || day === 'Sun')) {
+    tip += 'Weekend beach traffic: expect delays Five Points → Dewey on DE-1.';
+  } else if (h >= 15 && h <= 19 && (day === 'Fri')) {
+    tip += 'Friday PM southbound beach rush typically builds after 15:00 ET.';
+  } else if (h >= 10 && h <= 14 && day === 'Sun') {
+    tip += 'Sunday northbound return traffic often peaks late morning–afternoon.';
+  } else {
+    tip += 'Off-peak conditions usually moderate outside holiday weekends.';
+  }
+  box.innerHTML = `<span class="text-[#8b929e]">${tip}</span>
+    <div class="mt-1"><a class="text-blue-400 underline" href="https://deldot.gov/Traffic/travel_advisory/" target="_blank" rel="noopener">Open live Sussex / statewide advisories</a></div>`;
+}
+
 
 function renderParks() {
   const tbody = document.getElementById('parks-table');
@@ -748,24 +751,7 @@ function highlightFerry(mmsi) {
 }
 window.highlightFerry = highlightFerry;
 
-// Soft-refresh the active webcam so the stream stays alive without a full UI rebuild.
-function softRefreshWebcam() {
-  if (!activeWebcamId) return;
-  const cam = WEBCAMS.find(c => c.id === activeWebcamId);
-  if (!cam || !cam.embed) return;
-
-  const player = document.getElementById('webcam-player');
-  const iframe = player?.querySelector('iframe');
-  if (!iframe) return;
-
-  try {
-    iframe.src = iframe.src; // soft reconnect
-  } catch {
-    const base = cam.embed.split('?')[0];
-    const sep = cam.embed.includes('?') ? '&' : '?';
-    iframe.src = `${base}${sep}_t=${Date.now()}`;
-  }
-}
+function softRefreshWebcam() { /* webcams removed */ }
 
 // ---------- Connection status UI ----------
 function setConnectionStatus(mode) {
@@ -937,7 +923,7 @@ document.getElementById('tide-station').addEventListener('change', async (e) => 
 document.getElementById('refresh-btn').addEventListener('click', () => loadDashboard({ softWebcam: true }));
 
 // Initial render of static parts + load
-renderWebcams();
+renderTraffic();
 renderParks();
 renderFerry();
 loadDashboard({ softWebcam: false });
@@ -971,10 +957,10 @@ function openPanel(id) {
     ferry: 'Cape May–Lewes Ferry',
     'ais-map': 'Live AIS · Delaware Bay',
     parks: 'Coastal state parks',
-    cams: 'Live webcams & ferry cams',
+    traffic: 'DE-1 Coastal Highway traffic',
     alerts: 'Active weather alerts'
   };
-  const wide = id === 'ais-map' || id === 'cams' || id === 'ferry';
+  const wide = id === 'ais-map' || id === 'traffic' || id === 'ferry';
   const body = panelBody(id);
   root.innerHTML = `
     <div class="modal-backdrop open" id="modal-bg"></div>
@@ -1082,8 +1068,8 @@ function panelBody(id) {
           <ul class="text-sm space-y-0.5">${FERRY_SCHEDULE_LEWES.map(t=>`<li>${t}</li>`).join('')}</ul></div>
       </div>
       <p class="text-xs text-ocean-400">Schedule is a summer midweek pattern — always confirm on <a class="underline text-ocean-300" href="https://www.cmlf.com/schedules-fares/" target="_blank" rel="noopener">cmlf.com</a>. Crossing ~85 min. Reservations recommended.</p>
-      <div class="mt-4">
-        <button type="button" onclick="openCamPlayer('cmlf-lewes')" class="chip" style="border-color:#3b82f6;color:#93c5fd">▶ Open CMLF ferry cams in player</button>
+      <div class="mt-4 text-xs">
+        <a class="text-blue-400 underline" href="https://www.cmlf.com/check-traffic-live-webcam-feeds/" target="_blank" rel="noopener">CMLF terminal cameras (official) ↗</a>
       </div>`;
   }
   if (id === 'ais-map') {
@@ -1120,14 +1106,24 @@ function panelBody(id) {
       </tbody></table>
       <p class="text-xs text-ocean-500 mt-3">Confirm temporary closures at <a class="underline" href="https://destateparks.com" target="_blank" rel="noopener">destateparks.com</a></p>`;
   }
-  if (id === 'cams') {
-    return `<p class="text-xs text-[#8b929e] mb-3">Click a camera to open it in a floating player window.</p>
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">${WEBCAMS.map(cam => `
-        <button type="button" onclick="openCamPlayer('${cam.id}')" class="chip text-left p-3" style="border-color:#3a4150">
-          <div class="font-medium text-white">${cam.name}</div>
-          <div class="text-xs text-[#8b929e]">${cam.loc} · ${cam.note}</div>
-          <div class="text-xs text-blue-400 mt-1">▶ Play in window</div>
-        </button>`).join('')}</div>`;
+  if (id === 'traffic') {
+    return `<p class="text-xs text-[#8b929e] mb-3">Delaware Route 1 (Coastal Highway) is the primary beach corridor from Dover AFB south through Nassau, Rehoboth, Dewey, Bethany, and Fenwick. DelDOT manages real-time advisories; free public APIs for live speeds are limited.</p>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+        ${RT1_SEGMENTS.map(s => `
+          <div class="chip p-2" style="border-color:#3a4150">
+            <div class="font-semibold text-white text-sm">${s.name}</div>
+            <div class="text-xs text-[#8b929e]">${s.loc}</div>
+            <div class="text-xs text-[#c5cad3] mt-1">${s.note}</div>
+            <div class="text-[10px] mono text-[#6b7280] mt-1">${s.aadt}</div>
+          </div>`).join('')}
+      </div>
+      <div class="flex flex-wrap gap-2 text-xs">
+        <a class="text-blue-400 underline" href="https://deldot.gov/Traffic/travel_advisory/" target="_blank" rel="noopener">DelDOT travel advisories</a>
+        <a class="text-blue-400 underline" href="https://deldot.gov/map/" target="_blank" rel="noopener">DelDOT interactive map</a>
+        <a class="text-blue-400 underline" href="https://www.debeachtraffic.com/" target="_blank" rel="noopener">Lewes–Rehoboth traffic cam portal</a>
+        <a class="text-blue-400 underline" href="https://deldot.gov/Traffic/travel_advisory/" target="_blank" rel="noopener">Planned closures</a>
+      </div>
+      <p class="text-[11px] text-[#6b7280] mt-3">Tip: Friday southbound and Sunday northbound are the classic peak directions in summer. Five Points (US 9 / DE 1) is the usual bottleneck for Rehoboth / Dewey access.</p>`;
   }
   if (id === 'alerts') {
     const feats = p.alerts?.features || [];
